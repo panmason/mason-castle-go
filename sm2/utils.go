@@ -615,7 +615,7 @@ func sm2P256PointToAffine(xOut, yOut, x, y, z *sm2P256FieldElement) {
 }
 
 func WNafReversed(wnaf []int8) []int8 {
-	wnafRev := make([]int8, len(wnaf), len(wnaf))
+	wnafRev := make([]int8, len(wnaf))
 	for i, v := range wnaf {
 		wnafRev[len(wnaf)-(1+i)] = v
 	}
@@ -631,7 +631,7 @@ func sm2GenrateWNaf(b []byte) []int8 {
 	} else {
 		k = n
 	}
-	wnaf := make([]int8, k.BitLen()+1, k.BitLen()+1)
+	wnaf := make([]int8, k.BitLen()+1)
 	if k.Sign() == 0 {
 		return wnaf
 	}
@@ -660,7 +660,7 @@ func sm2GenrateWNaf(b []byte) []int8 {
 		pos = int(width)
 	}
 	if len(wnaf) > length+1 {
-		t := make([]int8, length+1, length+1)
+		t := make([]int8, length+1)
 		copy(t, wnaf[0:length+1])
 		wnaf = t
 	}

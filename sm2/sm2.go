@@ -15,6 +15,8 @@ import (
 var one = new(big.Int).SetInt64(1)
 var two = new(big.Int).SetInt64(2)
 
+var defaultUID = []byte("1234567812345678")
+
 type SM2PublicKey struct {
 	Curve elliptic.Curve
 	X, Y  *big.Int
@@ -29,6 +31,10 @@ type SM2Cipher struct {
 	X, Y *big.Int
 	C3   []byte
 	C2   []byte
+}
+
+type SM2Signurate struct {
+	R, S *big.Int
 }
 
 func (pub *SM2PublicKey) Equal(x crypto.PublicKey) bool {
@@ -205,4 +211,66 @@ func sm3Hash(data []byte) []byte {
 	sm3Hash := sm3.New()
 	sm3Hash.Write(data)
 	return sm3Hash.Sum(nil)
+}
+
+// ZA entl || id || a || b || gx || gy || pubx || puby
+func ZA(pub *SM2PublicKey, uid []byte) ([]byte, error) {
+	za := sm3.New()
+	uidLen := len(uid)
+	if uidLen >= 8192 {
+		return []byte{}, errors.New("SM2: uid too large")
+	}
+	Entla := uint16(8 * uidLen)
+	za.Write([]byte{byte((Entla >> 8) & 0xFF)})
+	za.Write([]byte{byte(Entla & 0xFF)})
+	if uidLen > 0 {
+		za.Write(uid)
+	}
+	za.Write(sm2P256ToBig(&sm2P256.a).Bytes())
+	za.Write(sm2P256.B.Bytes())
+	za.Write(sm2P256.Gx.Bytes())
+	za.Write(sm2P256.Gy.Bytes())
+
+	xBuf := pub.X.Bytes()
+	yBuf := pub.Y.Bytes()
+	if n := len(xBuf); n < 32 {
+		z := make([]byte, 32)
+		xBuf = append(z[:32-n], xBuf...)
+	}
+	if n := len(yBuf); n < 32 {
+		z := make([]byte, 32)
+		yBuf = append(z[:32-n], yBuf...)
+	}
+	za.Write(xBuf)
+	za.Write(yBuf)
+	return za.Sum(nil)[:32], nil
+}
+
+func Sign(random io.Reader, priv *SM2PrivateKey, msg, uid []byte) (*SM2Signurate, error) {
+	return nil, nil
+}
+
+func signHash(pub *SM2PublicKey, msg, uid []byte) ([]byte, error) {
+	if len(uid) == 0 {
+		uid = defaultUID
+	}
+
+	za, err := ZA(pub, uid)
+	if err != nil {
+		return nil, err
+	}
+	e, err := msgHash(za, msg)
+	if err != nil {
+		return nil, err
+	}
+
+	return e.Bytes(), nil
+
+}
+
+func msgHash(za, msg []byte) (*big.Int, error) {
+	e := sm3.New()
+	e.Write(za)
+	e.Write(msg)
+	return new(big.Int).SetBytes(e.Sum(nil)[:32]), nil
 }
