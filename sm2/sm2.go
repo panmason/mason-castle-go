@@ -12,6 +12,7 @@ import (
 	"github.com/panmason/mason-castle-go/sm3"
 )
 
+var errZeroParam = errors.New("zero parameter")
 var one = new(big.Int).SetInt64(1)
 var two = new(big.Int).SetInt64(2)
 
@@ -220,9 +221,9 @@ func ZA(pub *SM2PublicKey, uid []byte) ([]byte, error) {
 	if uidLen >= 8192 {
 		return []byte{}, errors.New("SM2: uid too large")
 	}
-	Entla := uint16(8 * uidLen)
-	za.Write([]byte{byte((Entla >> 8) & 0xFF)})
-	za.Write([]byte{byte(Entla & 0xFF)})
+	entla := uint16(8 * uidLen)
+	za.Write([]byte{byte((entla >> 8) & 0xFF)})
+	za.Write([]byte{byte(entla & 0xFF)})
 	if uidLen > 0 {
 		za.Write(uid)
 	}
@@ -247,7 +248,78 @@ func ZA(pub *SM2PublicKey, uid []byte) ([]byte, error) {
 }
 
 func Sign(random io.Reader, priv *SM2PrivateKey, msg, uid []byte) (*SM2Signurate, error) {
-	return nil, nil
+	hashBytes, err := signHash(&priv.PublicKey, msg, uid)
+	if err != nil {
+		return nil, err
+	}
+	e := new(big.Int).SetBytes(hashBytes)
+	c := priv.PublicKey.Curve
+	N := c.Params().N
+	if N.Sign() == 0 {
+		return nil, errZeroParam
+	}
+	var k, r, s *big.Int
+	for { // 调整算法细节以实现SM2
+		for {
+			k, err = randFieldElement(c, random)
+			if err != nil {
+				return nil, err
+			}
+			r, _ = priv.PublicKey.Curve.ScalarBaseMult(k.Bytes())
+			r.Add(r, e)
+			r.Mod(r, N)
+			if r.Sign() != 0 {
+				if t := new(big.Int).Add(r, k); t.Cmp(N) != 0 {
+					break
+				}
+			}
+
+		}
+		rD := new(big.Int).Mul(priv.D, r)
+		s = new(big.Int).Sub(k, rD)
+		d1 := new(big.Int).Add(priv.D, one)
+		d1Inv := new(big.Int).ModInverse(d1, N)
+		s.Mul(s, d1Inv)
+		s.Mod(s, N)
+		if s.Sign() != 0 {
+			break
+		}
+	}
+	return &SM2Signurate{
+		R: r,
+		S: s,
+	}, nil
+}
+
+func Verify(pubKey *SM2PublicKey, msg, uid []byte, sign *SM2Signurate) (bool, error) {
+	hashBytes, err := signHash(pubKey, msg, uid)
+	if err != nil {
+		return false, err
+	}
+	e := new(big.Int).SetBytes(hashBytes)
+	c := pubKey.Curve
+	N := c.Params().N
+	one := new(big.Int).SetInt64(1)
+	if sign.R.Cmp(one) < 0 || sign.S.Cmp(one) < 0 {
+		return false, errors.New("r or s is one")
+	}
+	if sign.S.Cmp(N) >= 0 || sign.S.Cmp(N) >= 0 {
+		return false, errors.New("r or s illeage")
+	}
+
+	t := new(big.Int).Add(sign.R, sign.S)
+	t.Mod(t, N)
+	if t.Sign() == 0 {
+		return false, errors.New("sign is zero")
+	}
+	var x *big.Int
+	x1, y1 := c.ScalarBaseMult(sign.S.Bytes())
+	x2, y2 := c.ScalarMult(pubKey.X, pubKey.Y, t.Bytes())
+	x, _ = c.Add(x1, y1, x2, y2)
+
+	x.Add(x, e)
+	x.Mod(x, N)
+	return x.Cmp(sign.R) == 0, nil
 }
 
 func signHash(pub *SM2PublicKey, msg, uid []byte) ([]byte, error) {
